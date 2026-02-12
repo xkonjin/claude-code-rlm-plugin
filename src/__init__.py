@@ -13,6 +13,7 @@ from .context_router import ContextRouter, ContextData
 from .repl_engine import RLMREPLEngine
 from .agent_manager import ParallelAgentManager
 from .integrations.claude_tools import ClaudeToolsIntegration
+from .llm_backends import get_llm_manager
 
 
 class RLMPlugin:
@@ -20,12 +21,18 @@ class RLMPlugin:
     
     def __init__(self):
         self.config = self._load_config()
+        self.llm_manager = get_llm_manager()
+        
         self.router = ContextRouter(self.config)
         self.repl = RLMREPLEngine()
         self.agent_manager = ParallelAgentManager(
             max_concurrent=self.config['processing']['max_concurrent_agents']
         )
         self._cache = {}
+        
+        # Log initialization status
+        status = self.llm_manager.get_status()
+        print(f"RLM Plugin initialized with {status['current']} backend")
     
     def _load_config(self) -> Dict:
         """Load configuration from plugin.json"""
@@ -109,7 +116,7 @@ class RLMPlugin:
         
         if query:
             results = self.agent_manager.process_chunks_sync(chunks, query)
-            aggregated = processor.aggregate(results)
+            aggregated = self.agent_manager.aggregate_results(results)
             return {
                 "type": "rlm_query",
                 "strategy": strategy,
@@ -141,7 +148,7 @@ class RLMPlugin:
         
         if query:
             results = self.agent_manager.process_chunks_sync(chunks, query)
-            aggregated = processor.aggregate(results)
+            aggregated = self.agent_manager.aggregate_results(results)
             return {
                 "type": "rlm_query",
                 "strategy": strategy,
@@ -167,6 +174,10 @@ class RLMPlugin:
     def repl_session(self) -> RLMREPLEngine:
         """Get REPL session for interactive processing"""
         return self.repl
+    
+    def get_llm_status(self) -> Dict[str, Any]:
+        """Get LLM backend status"""
+        return self.llm_manager.get_status()
     
     def clear_cache(self):
         """Clear processing cache"""

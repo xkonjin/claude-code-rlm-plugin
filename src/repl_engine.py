@@ -7,9 +7,12 @@ import sys
 import uuid
 import tempfile
 import traceback
+import logging
 from typing import Any, Dict, Optional, Callable
 from pathlib import Path
 import json
+
+from .llm_backends import get_llm_manager
 
 
 class RLMREPLEngine:
@@ -20,22 +23,36 @@ class RLMREPLEngine:
         self.temp_dir = Path(tempfile.gettempdir()) / f"rlm-{self.session_id}"
         self.temp_dir.mkdir(exist_ok=True)
         
+        # Initialize LLM manager
+        self.llm_manager = get_llm_manager()
+        
+        # Use provided function or create one from manager
+        if llm_query_fn:
+            self._llm_query_fn = llm_query_fn
+        else:
+            self._llm_query_fn = self.llm_manager.create_query_function()
+        
         self.namespace = {
             'context': None,
             'chunks': [],
             'results': [],
             'temp_dir': str(self.temp_dir),
-            'llm_query': self._create_llm_query_wrapper(llm_query_fn),
+            'llm_query': self._create_llm_query_wrapper(self._llm_query_fn),
             'load_file': self.load_file,
             'load_content': self.load_content,
             'decompose': self._decompose,
             'query_chunk': self._query_chunk,
             'aggregate': self._aggregate,
+            'llm_status': self.get_llm_status,
             '__builtins__': __builtins__,
         }
         
         self._recursion_depth = 0
         self._max_recursion = 2
+        
+        # Log LLM status
+        status = self.llm_manager.get_status()
+        logging.info(f"RLM REPL initialized with {status['current']} backend")
     
     def _create_llm_query_wrapper(self, llm_fn: Optional[Callable]) -> Callable:
         """Create wrapper for LLM queries with recursion protection"""
@@ -51,10 +68,10 @@ class RLMREPLEngine:
                     else:
                         full_prompt = prompt
                     
-                    result = llm_fn(full_prompt, model=model)
+                    result = llm_fn(full_prompt, model)
                     return result
                 else:
-                    return f"[LLM query: {prompt[:100]}...]"
+                    return f"[No LLM backend available - Query: {prompt[:100]}...]"
             finally:
                 self._recursion_depth -= 1
         
@@ -230,6 +247,10 @@ class RLMREPLEngine:
     def set_variable(self, name: str, value: Any):
         """Set variable in namespace"""
         self.namespace[name] = value
+    
+    def get_llm_status(self) -> Dict[str, Any]:
+        """Get LLM backend status for debugging"""
+        return self.llm_manager.get_status()
     
     def cleanup(self):
         """Clean up temporary files"""

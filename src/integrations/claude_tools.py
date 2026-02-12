@@ -2,9 +2,12 @@
 Claude Code tools integration for RLM plugin
 """
 
-from typing import Union, Optional, Dict, List, Any
+from typing import Union, Optional, Dict, List, Any, Callable
 import os
 import hashlib
+import logging
+
+from ..llm_backends import get_llm_manager
 
 
 class ClaudeToolsIntegration:
@@ -13,6 +16,7 @@ class ClaudeToolsIntegration:
     def __init__(self, claude_tools=None, rlm_plugin=None):
         self.tools = claude_tools
         self.rlm = rlm_plugin
+        self.llm_manager = get_llm_manager()
         self._cache = {}
     
     def smart_read(self, file_path: str) -> Union[str, Dict[str, Any]]:
@@ -160,11 +164,17 @@ class ClaudeToolsIntegration:
         }
     
     def llm_query(self, prompt: str, model: str = "haiku") -> str:
-        """Wrapper for LLM queries"""
-        if self.tools and hasattr(self.tools, 'task'):
-            return self.tools.task(
-                instruction=prompt,
-                model=model
-            )
-        else:
-            return f"[LLM Query ({model}): {prompt[:100]}...]"
+        """Wrapper for LLM queries using RLM backends"""
+        try:
+            response = self.llm_manager.query(prompt, model)
+            if response.error:
+                logging.warning(f"LLM query failed: {response.error}")
+                return f"[Error: {response.error}]"
+            return response.content
+        except Exception as e:
+            logging.error(f"Exception in llm_query: {str(e)}")
+            return f"[Query failed: {str(e)}]"
+    
+    def get_llm_status(self) -> Dict[str, Any]:
+        """Get LLM backend status"""
+        return self.llm_manager.get_status()

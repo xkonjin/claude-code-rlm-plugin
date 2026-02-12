@@ -1,0 +1,4 @@
+anthropic>=0.40.0
+# Optional backends (not required if running inside Claude Code):
+# openai>=1.0.0
+# requests>=2.31.0

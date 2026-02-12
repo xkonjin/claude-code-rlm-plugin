@@ -7,6 +7,9 @@ import concurrent.futures
 from typing import List, Dict, Any, Callable, Optional
 from dataclasses import dataclass
 import time
+import logging
+
+from .llm_backends import get_llm_manager, LLMResponse
 
 
 @dataclass
@@ -38,23 +41,43 @@ class ParallelAgentManager:
     
     def __init__(self, max_concurrent: int = 8, llm_query_fn: Optional[Callable] = None):
         self.max_concurrent = max_concurrent
-        self.llm_query_fn = llm_query_fn
+        self.llm_manager = get_llm_manager()
+        
+        # Use provided function or create one from the LLM manager
+        if llm_query_fn:
+            self.llm_query_fn = llm_query_fn
+        else:
+            self.llm_query_fn = self.llm_manager.create_query_function()
+        
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent)
         self._active_tasks = {}
         self._completed_results = []
+        
+        # Log which backend is being used
+        status = self.llm_manager.get_status()
+        logging.info(f"RLM Agent Manager initialized with {status['current']} backend")
     
     def process_chunks_sync(self, chunks: List[Dict], query: str) -> List[Result]:
         """Process chunks synchronously with parallel execution"""
-        chunk_tasks = [
-            ChunkTask(
-                id=i,
-                content=chunk.get('content', chunk),
-                task_type="query",
-                query=query,
-                metadata=chunk if isinstance(chunk, dict) else {}
-            )
-            for i, chunk in enumerate(chunks)
-        ]
+        chunk_tasks = []
+        for i, chunk in enumerate(chunks):
+            if isinstance(chunk, dict):
+                task = ChunkTask(
+                    id=chunk.get('id', i),
+                    content=chunk.get('content', str(chunk)),
+                    task_type="query",
+                    query=query,
+                    metadata={k: v for k, v in chunk.items() if k != 'content'}
+                )
+            else:
+                task = ChunkTask(
+                    id=i,
+                    content=str(chunk),
+                    task_type="query",
+                    query=query,
+                    metadata={}
+                )
+            chunk_tasks.append(task)
         
         results = []
         with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_concurrent) as executor:
@@ -80,16 +103,25 @@ class ParallelAgentManager:
     
     async def process_chunks_async(self, chunks: List[Dict], query: str) -> List[Result]:
         """Process chunks asynchronously"""
-        chunk_tasks = [
-            ChunkTask(
-                id=i,
-                content=chunk.get('content', chunk),
-                task_type="query",
-                query=query,
-                metadata=chunk if isinstance(chunk, dict) else {}
-            )
-            for i, chunk in enumerate(chunks)
-        ]
+        chunk_tasks = []
+        for i, chunk in enumerate(chunks):
+            if isinstance(chunk, dict):
+                task = ChunkTask(
+                    id=chunk.get('id', i),
+                    content=chunk.get('content', str(chunk)),
+                    task_type="query",
+                    query=query,
+                    metadata={k: v for k, v in chunk.items() if k != 'content'}
+                )
+            else:
+                task = ChunkTask(
+                    id=i,
+                    content=str(chunk),
+                    task_type="query",
+                    query=query,
+                    metadata={}
+                )
+            chunk_tasks.append(task)
         
         tasks = []
         for batch in self._batch_tasks(chunk_tasks, self.max_concurrent):
@@ -113,30 +145,41 @@ class ParallelAgentManager:
         return tasks
     
     def _process_single_chunk(self, task: ChunkTask) -> Result:
-        """Process a single chunk"""
+        """Process a single chunk with real LLM processing"""
         start_time = time.time()
         
         try:
-            if not self.llm_query_fn:
-                content = f"[Processed chunk {task.id}: {len(str(task.content))} chars]"
-            else:
-                model = self._select_model(task)
-                prompt = self._build_prompt(task)
-                content = self.llm_query_fn(prompt, model=model)
+            model = self._select_model(task)
+            prompt = self._build_prompt(task)
+            
+            # Use the LLM manager for more detailed response
+            llm_response = self.llm_manager.query(prompt, model=model)
             
             processing_time = (time.time() - start_time) * 1000
+            
+            # Handle both successful responses and errors
+            if llm_response.error:
+                logging.warning(f"LLM error for chunk {task.id}: {llm_response.error}")
+                content = f"[Error processing chunk {task.id}: {llm_response.error}]"
+            else:
+                content = llm_response.content
             
             return Result(
                 chunk_id=task.id,
                 content=content,
                 processing_time_ms=processing_time,
-                model_used=self._select_model(task)
+                model_used=llm_response.model_used
             )
+            
         except Exception as e:
+            processing_time = (time.time() - start_time) * 1000
+            logging.error(f"Exception processing chunk {task.id}: {str(e)}")
+            
             return Result(
                 chunk_id=task.id,
-                content=None,
-                processing_time_ms=(time.time() - start_time) * 1000,
+                content=f"[Processing failed for chunk {task.id}: {str(e)}]",
+                processing_time_ms=processing_time,
+                model_used=self._select_model(task),
                 error=str(e)
             )
     
@@ -157,23 +200,52 @@ class ParallelAgentManager:
             return "haiku"
     
     def _build_prompt(self, task: ChunkTask) -> str:
-        """Build prompt for chunk processing"""
+        """Build optimized prompt for chunk processing"""
+        content_preview = str(task.content)
+        
+        # Truncate content if too long, but preserve structure
+        if len(content_preview) > 10000:
+            content_preview = content_preview[:9500] + "\n... [content truncated]"
+        
+        chunk_info = f"Chunk {task.id}"
+        if task.metadata:
+            if 'line_range' in task.metadata:
+                chunk_info += f" (lines {task.metadata['line_range']})"
+            elif 'char_range' in task.metadata:
+                chunk_info += f" (chars {task.metadata['char_range']})"
+        
         if task.query:
-            return f"""Process this chunk of data to answer the following query:
+            return f"""Analyze this data chunk and respond to the specific query below.
 
-Query: {task.query}
+QUERY: {task.query}
 
-Chunk {task.id}:
-{str(task.content)[:10000]}
+DATA ({chunk_info}):
+{content_preview}
 
-Provide a concise response focusing only on information relevant to the query."""
+INSTRUCTIONS:
+- Focus only on information directly relevant to the query
+- Be precise and concise
+- If no relevant information is found, respond with "No relevant information in this chunk"
+- Use bullet points for multiple findings
+- Preserve important details like numbers, names, and specific terms
+
+RESPONSE:"""
         else:
-            return f"""Extract key information from this chunk:
+            # General extraction task
+            return f"""Extract and summarize key information from this data chunk.
 
-Chunk {task.id}:
-{str(task.content)[:10000]}
+DATA ({chunk_info}):
+{content_preview}
 
-Provide a structured summary of the main points."""
+INSTRUCTIONS:
+- Identify the main topics, concepts, or data points
+- Preserve important details (numbers, names, dates, etc.)
+- Organize findings in a clear, structured format
+- If code: describe main functions, classes, or logic
+- If data: summarize patterns, key values, or structure
+- If text: extract main ideas and important facts
+
+KEY FINDINGS:"""
     
     def _batch_tasks(self, tasks: List[ChunkTask], batch_size: int) -> List[List[ChunkTask]]:
         """Batch tasks for parallel processing"""
