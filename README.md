@@ -52,33 +52,15 @@ Notes:
 
 Decomposition time (seconds):
 
-```mermaid
-xychart-beta
-    title "Decomposition Time (s)"
-    x-axis ["large_dataset.json","application.log","large_dataset.csv"]
-    y-axis "seconds" 0 --> 1
-    bar [0.042,0.020,0.873]
-```
+![Decomposition Time](assets/benchmarks/decomposition_time.png)
 
 Query processing time (seconds):
 
-```mermaid
-xychart-beta
-    title "Query Time (s)"
-    x-axis ["large_dataset.json","application.log","large_dataset.csv"]
-    y-axis "seconds" 0 --> 50
-    bar [17.700,45.880,8.798]
-```
+![Query Processing Time](assets/benchmarks/query_time.png)
 
 Chunks per file:
 
-```mermaid
-xychart-beta
-    title "Chunks Per File"
-    x-axis ["large_dataset.json","application.log","large_dataset.csv"]
-    y-axis "chunks" 0 --> 120
-    bar [19,117,10]
-```
+![Chunks Per File](assets/benchmarks/chunks_per_file.png)
 
 ### Smaller file tests (test_fixed_plugin.py)
 
