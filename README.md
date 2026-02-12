@@ -48,6 +48,38 @@ Notes:
 - Decomposition throughput in the test output is based on file size / decomposition time only.
 - Query time depends on backend latency, model speed, and network conditions.
 
+### Graphs (same run)
+
+Decomposition time (seconds):
+
+```mermaid
+xychart-beta
+    title "Decomposition Time (s)"
+    x-axis ["large_dataset.json","application.log","large_dataset.csv"]
+    y-axis "seconds" 0 --> 1
+    bar [0.042,0.020,0.873]
+```
+
+Query processing time (seconds):
+
+```mermaid
+xychart-beta
+    title "Query Time (s)"
+    x-axis ["large_dataset.json","application.log","large_dataset.csv"]
+    y-axis "seconds" 0 --> 50
+    bar [17.700,45.880,8.798]
+```
+
+Chunks per file:
+
+```mermaid
+xychart-beta
+    title "Chunks Per File"
+    x-axis ["large_dataset.json","application.log","large_dataset.csv"]
+    y-axis "chunks" 0 --> 120
+    bar [19,117,10]
+```
+
 ### Smaller file tests (test_fixed_plugin.py)
 
 - 307,783-byte text file -> `file_chunking`, 15 chunks
