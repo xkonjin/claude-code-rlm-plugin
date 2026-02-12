@@ -18,10 +18,11 @@ from .llm_backends import get_llm_manager
 class RLMREPLEngine:
     """Interactive REPL for RLM processing"""
     
-    def __init__(self, llm_query_fn: Optional[Callable] = None):
+    def __init__(self, llm_query_fn: Optional[Callable] = None, config: Optional[Dict] = None):
         self.session_id = str(uuid.uuid4())[:8]
         self.temp_dir = Path(tempfile.gettempdir()) / f"rlm-{self.session_id}"
         self.temp_dir.mkdir(exist_ok=True)
+        self._config = config or {}
         
         # Initialize LLM manager
         self.llm_manager = get_llm_manager()
@@ -48,7 +49,7 @@ class RLMREPLEngine:
         }
         
         self._recursion_depth = 0
-        self._max_recursion = 2
+        self._max_recursion = self._config.get('processing', {}).get('recursion_depth_limit', 2)
         
         # Log LLM status
         status = self.llm_manager.get_status()
@@ -95,7 +96,7 @@ class RLMREPLEngine:
                 "total_size": size
             }
         else:
-            content = file_path.read_text()
+            content = file_path.read_text(encoding='utf-8', errors='ignore')
             self.namespace['context'] = content
             return {
                 "status": "loaded",

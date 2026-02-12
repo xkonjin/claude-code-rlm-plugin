@@ -459,6 +459,8 @@ class ClaudeCLIBackend(LLMBackend):
                     processing_time_ms=processing_time
                 )
             else:
+                # Mark unavailable to avoid repeated failures in this session
+                self._available = False
                 return LLMResponse(
                     content="", model_used=model or "claude-cli",
                     provider=self.name,
@@ -466,6 +468,7 @@ class ClaudeCLIBackend(LLMBackend):
                     error=f"CLI error: {result.stderr.strip()[:200]}"
                 )
         except subprocess.TimeoutExpired:
+            self._available = False
             return LLMResponse(
                 content="", model_used=model or "claude-cli",
                 provider=self.name,
@@ -473,6 +476,7 @@ class ClaudeCLIBackend(LLMBackend):
                 error="Claude CLI timed out"
             )
         except Exception as e:
+            self._available = False
             return LLMResponse(
                 content="", model_used=model or "claude-cli",
                 provider=self.name,

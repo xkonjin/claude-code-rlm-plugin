@@ -164,8 +164,8 @@ class StructuralDecomposition:
         """Decompose XML/HTML into element chunks"""
         chunks = []
         
-        tag_pattern = r'<(\w+)[^>]*>.*?</\1>'
-        matches = re.findall(tag_pattern, content, re.DOTALL)
+        tag_pattern = re.compile(r'<(\w+)[^>]*>.*?</\1>', re.DOTALL)
+        matches = [match.group(0) for match in tag_pattern.finditer(content)]
         
         if matches:
             current_chunk = []

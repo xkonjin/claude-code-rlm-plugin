@@ -169,7 +169,10 @@ def test_file_processing():
     print(f"Chunks processed: {result.get('chunks_processed', 0)}")
     
     if 'result' in result and result['result']:
-        aggregated = result['result'].get('aggregated', '')
+        if isinstance(result['result'], dict):
+            aggregated = result['result'].get('aggregated', '')
+        else:
+            aggregated = result['result']
         if aggregated:
             print(f"Result preview: {str(aggregated)[:300]}...")
     
@@ -186,7 +189,10 @@ def test_file_processing():
     print(f"Chunks processed: {result.get('chunks_processed', 0)}")
     
     if 'result' in result and result['result']:
-        aggregated = result['result'].get('aggregated', '')
+        if isinstance(result['result'], dict):
+            aggregated = result['result'].get('aggregated', '')
+        else:
+            aggregated = result['result']
         if aggregated:
             print(f"Result preview: {str(aggregated)[:300]}...")
     
@@ -206,7 +212,10 @@ def test_file_processing():
         print(f"Chunks processed: {result.get('chunks_processed', 0)}")
         
         if 'result' in result and result['result']:
-            aggregated = result['result'].get('aggregated', '')
+            if isinstance(result['result'], dict):
+                aggregated = result['result'].get('aggregated', '')
+            else:
+                aggregated = result['result']
             if aggregated:
                 print(f"Result preview: {str(aggregated)[:300]}...")
 
@@ -283,7 +292,10 @@ def test_direct_content_processing():
     print(f"Chunks processed: {result.get('chunks_processed', 0)}")
     
     if 'result' in result and result['result']:
-        aggregated = result['result'].get('aggregated', '')
+        if isinstance(result['result'], dict):
+            aggregated = result['result'].get('aggregated', '')
+        else:
+            aggregated = result['result']
         if aggregated:
             print(f"Result preview: {str(aggregated)[:400]}...")
 

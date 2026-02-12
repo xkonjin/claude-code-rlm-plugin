@@ -89,6 +89,78 @@ def test_structural_decomposition():
     print(f"✓ Structural decomposition working")
 
 
+def test_xml_decomposition():
+    """Test XML decomposition preserves element content"""
+    print("Testing XML decomposition...")
+
+    from src.strategies.structural_decomp import StructuralDecomposition
+
+    decomposer = StructuralDecomposition(max_chunk_size=200)
+    xml_data = "<root><item>A</item><item>B</item><item>C</item></root>"
+    chunks = decomposer._decompose_xml(xml_data)
+
+    assert len(chunks) > 0, "Should decompose XML"
+    assert "<item>" in chunks[0]["content"], "XML content should include elements"
+
+    print("✓ XML decomposition working")
+
+
+def test_time_window_content():
+    """Test time-window splitting preserves full window content"""
+    print("Testing time window splitting...")
+
+    from src.strategies.time_window import TimeWindowSplitting
+
+    splitter = TimeWindowSplitting(window_size_lines=12)
+    lines = [
+        f"2026-02-10 12:00:{i:02d} INFO event {i}"
+        for i in range(13)
+    ]
+    chunks = splitter.decompose_content("\n".join(lines), {})
+
+    assert len(chunks) > 0, "Should produce at least one chunk"
+    first_chunk_lines = chunks[0]["content"].split("\n")
+    assert first_chunk_lines[0] == lines[0], "Chunk should preserve window start"
+
+    print("✓ Time window splitting working")
+
+
+def test_direct_query_path():
+    """Test direct query path for small content"""
+    print("Testing direct query path...")
+
+    plugin = RLMPlugin()
+    result = plugin.process(content="Small content for direct query", query="Summarize")
+
+    assert result["type"] == "direct_query", "Should use direct query for small content"
+    assert "result" in result, "Direct query should return result"
+
+    print("✓ Direct query path working")
+
+
+def test_multi_file_processing():
+    """Test multi-file processing path"""
+    print("Testing multi-file processing...")
+
+    plugin = RLMPlugin()
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f1, \
+         tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f2:
+        f1.write("File one content")
+        f2.write("File two content")
+        file_paths = [f1.name, f2.name]
+
+    try:
+        result = plugin.process(file_path=file_paths, query="Summarize both files")
+        assert result["type"] == "direct_query", "Small multi-file query should be direct"
+        assert "result" in result, "Multi-file direct query should return result"
+    finally:
+        for path in file_paths:
+            if os.path.exists(path):
+                os.unlink(path)
+
+    print("✓ Multi-file processing working")
+
+
 def test_repl_engine():
     """Test REPL engine functionality"""
     print("Testing REPL engine...")
@@ -203,6 +275,10 @@ def run_all_tests():
         test_context_detection,
         test_file_chunking,
         test_structural_decomposition,
+        test_xml_decomposition,
+        test_time_window_content,
+        test_direct_query_path,
+        test_multi_file_processing,
         test_repl_engine,
         test_parallel_processing,
         test_integration,

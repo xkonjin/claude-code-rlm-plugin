@@ -107,10 +107,16 @@ class ContextRouter:
     
     def _init_strategies(self):
         """Initialize available strategies"""
+        processing = self.config.get('processing', {})
+        chunk_size = processing.get('chunk_size', 50_000)
+        overlap_percent = processing.get('chunk_overlap_percent', 10)
+        overlap = int(chunk_size * (overlap_percent / 100)) if overlap_percent else 0
+        log_window_lines = processing.get('log_window_lines', 1000)
+
         self.strategies = {
-            "file_chunking": FileBasedChunking(),
-            "structural_decomp": StructuralDecomposition(),
-            "time_window": TimeWindowSplitting(),
+            "file_chunking": FileBasedChunking(chunk_size=chunk_size, overlap=overlap),
+            "structural_decomp": StructuralDecomposition(max_chunk_size=chunk_size),
+            "time_window": TimeWindowSplitting(window_size_lines=log_window_lines),
         }
     
     def should_activate_rlm(self, context_data: ContextData) -> Tuple[bool, Optional[str], Dict]:
@@ -122,7 +128,13 @@ class ContextRouter:
         
         if not auto_config.get('enabled', True):
             return False, None, {}
-        
+
+        if context_data.has_large_structured_data():
+            return True, "structural_decomp", {
+                "split_strategy": "auto",
+                "reason": "large_structured_data"
+            }
+
         token_threshold = auto_config.get('token_count', 100_000)
         if context_data.estimated_tokens > token_threshold:
             return True, "token_chunking", {
@@ -144,32 +156,26 @@ class ContextRouter:
                 "reason": "file_count_exceeded"
             }
         
-        if context_data.has_large_structured_data():
-            return True, "structural_decomp", {
-                "split_strategy": "auto",
-                "reason": "large_structured_data"
-            }
-        
         return False, None, {}
     
     def select_strategy(self, data_type: str, size: int) -> ProcessingStrategy:
         """Select appropriate processing strategy based on data type"""
         strategy_map = {
-            "json": StructuralDecomposition(),
-            "yaml": StructuralDecomposition(),
-            "xml": StructuralDecomposition(),
-            "csv": StructuralDecomposition(),
-            "log": TimeWindowSplitting(),
-            "logs": TimeWindowSplitting(),
+            "json": self.strategies["structural_decomp"],
+            "yaml": self.strategies["structural_decomp"],
+            "xml": self.strategies["structural_decomp"],
+            "csv": self.strategies["structural_decomp"],
+            "log": self.strategies["time_window"],
+            "logs": self.strategies["time_window"],
         }
         
         if data_type in strategy_map:
             return strategy_map[data_type]
         
         if size > 1_000_000:
-            return FileBasedChunking()
+            return self.strategies["file_chunking"]
         
-        return FileBasedChunking()
+        return self.strategies["file_chunking"]
     
     def get_strategy(self, strategy_name: str) -> ProcessingStrategy:
         """Get strategy by name"""

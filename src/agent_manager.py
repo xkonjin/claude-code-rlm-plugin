@@ -39,9 +39,15 @@ class Result:
 class ParallelAgentManager:
     """Manages parallel execution of RLM sub-agents"""
     
-    def __init__(self, max_concurrent: int = 8, llm_query_fn: Optional[Callable] = None):
+    def __init__(
+        self,
+        max_concurrent: int = 8,
+        llm_query_fn: Optional[Callable] = None,
+        model_map: Optional[Dict[str, str]] = None
+    ):
         self.max_concurrent = max_concurrent
         self.llm_manager = get_llm_manager()
+        self.model_map = model_map or {}
         
         # Use provided function or create one from the LLM manager
         if llm_query_fn:
@@ -190,6 +196,8 @@ class ParallelAgentManager:
     
     def _select_model(self, task: ChunkTask) -> str:
         """Select appropriate model based on task type"""
+        if task.task_type in self.model_map:
+            return self.model_map[task.task_type]
         if task.task_type == "extraction":
             return "haiku"
         elif task.task_type == "analysis":
@@ -219,6 +227,8 @@ class ParallelAgentManager:
 
         chunk_info = f"Chunk {task.id}"
         if task.metadata:
+            if 'source_file' in task.metadata:
+                chunk_info += f" ({task.metadata['source_file']})"
             if 'line_range' in task.metadata:
                 chunk_info += f" (lines {task.metadata['line_range']})"
             elif 'char_range' in task.metadata:
@@ -366,13 +376,14 @@ SYNTHESIZED ANSWER:"""
 
         start = time.time()
         try:
-            # Use sonnet-tier for synthesis (better reasoning than haiku)
-            response = self.llm_manager.query(synthesis_prompt, model="sonnet")
+            synthesis_model = self.model_map.get("synthesis", "sonnet")
+            response = self.llm_manager.query(synthesis_prompt, model=synthesis_model)
             elapsed = (time.time() - start) * 1000
 
             if response.error:
                 # Try haiku as fallback
-                response = self.llm_manager.query(synthesis_prompt, model="haiku")
+                fallback_model = self.model_map.get("extraction", "haiku")
+                response = self.llm_manager.query(synthesis_prompt, model=fallback_model)
                 elapsed = (time.time() - start) * 1000
 
                 if response.error:

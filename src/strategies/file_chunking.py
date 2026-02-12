@@ -28,31 +28,38 @@ class FileBasedChunking:
         """Decompose content string into chunks"""
         chunks = []
         chunk_size = metadata.get('chunk_size', self.chunk_size)
+        if not isinstance(chunk_size, int) or chunk_size <= 0:
+            chunk_size = self.chunk_size
         
         if '\n' in content:
             lines = content.split('\n')
             current_chunk = []
             current_size = 0
+            current_start_line = 0
             
             for line in lines:
                 line_size = len(line) + 1
                 
                 if current_size + line_size > chunk_size and current_chunk:
                     chunk_content = '\n'.join(current_chunk)
+                    end_line = current_start_line + len(current_chunk)
                     chunks.append({
                         'id': len(chunks),
                         'content': chunk_content,
                         'size': current_size,
-                        'line_range': (chunks[-1]['line_range'][1] if chunks else 0,
-                                     chunks[-1]['line_range'][1] + len(current_chunk) if chunks else len(current_chunk))
+                        'line_range': (current_start_line, end_line)
                     })
                     
                     if self.overlap > 0:
-                        keep_lines = int(len(current_chunk) * (self.overlap / chunk_size))
+                        overlap_ratio = self.overlap / max(chunk_size, 1)
+                        keep_lines = int(round(len(current_chunk) * overlap_ratio))
+                        keep_lines = min(max(keep_lines, 1), len(current_chunk))
                         current_chunk = current_chunk[-keep_lines:]
+                        current_start_line = end_line - keep_lines
                         current_size = sum(len(l) + 1 for l in current_chunk)
                     else:
                         current_chunk = []
+                        current_start_line = end_line
                         current_size = 0
                 
                 current_chunk.append(line)
@@ -60,12 +67,12 @@ class FileBasedChunking:
             
             if current_chunk:
                 chunk_content = '\n'.join(current_chunk)
+                end_line = current_start_line + len(current_chunk)
                 chunks.append({
                     'id': len(chunks),
                     'content': chunk_content,
                     'size': current_size,
-                    'line_range': (chunks[-1]['line_range'][1] if chunks else 0,
-                                 chunks[-1]['line_range'][1] + len(current_chunk) if chunks else len(current_chunk))
+                    'line_range': (current_start_line, end_line)
                 })
         else:
             for i in range(0, len(content), chunk_size - self.overlap):
