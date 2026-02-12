@@ -201,19 +201,29 @@ class ParallelAgentManager:
     
     def _build_prompt(self, task: ChunkTask) -> str:
         """Build optimized prompt for chunk processing"""
-        content_preview = str(task.content)
-        
-        # Truncate content if too long, but preserve structure
-        if len(content_preview) > 10000:
-            content_preview = content_preview[:9500] + "\n... [content truncated]"
-        
+        content_str = str(task.content)
+
+        # Keep up to 30K chars but preserve first and last 500 chars
+        # so boundary items (first/last records) are never lost
+        max_content = 30_000
+        if len(content_str) > max_content:
+            keep_edge = 500
+            middle_budget = max_content - (keep_edge * 2) - 50
+            content_preview = (
+                content_str[:keep_edge + middle_budget]
+                + f"\n... [{len(content_str) - max_content} chars omitted] ...\n"
+                + content_str[-keep_edge:]
+            )
+        else:
+            content_preview = content_str
+
         chunk_info = f"Chunk {task.id}"
         if task.metadata:
             if 'line_range' in task.metadata:
                 chunk_info += f" (lines {task.metadata['line_range']})"
             elif 'char_range' in task.metadata:
                 chunk_info += f" (chars {task.metadata['char_range']})"
-        
+
         if task.query:
             return f"""Analyze this data chunk and respond to the specific query below.
 
@@ -224,14 +234,14 @@ DATA ({chunk_info}):
 
 INSTRUCTIONS:
 - Focus only on information directly relevant to the query
-- Be precise and concise
+- Be precise and concise — short bullet points, not paragraphs
 - If no relevant information is found, respond with "No relevant information in this chunk"
-- Use bullet points for multiple findings
-- Preserve important details like numbers, names, and specific terms
+- Report exact counts of items/records in THIS chunk
+- Note the FIRST and LAST item in this chunk (important for boundary queries)
+- Preserve important details: numbers, names, dates, identifiers
 
 RESPONSE:"""
         else:
-            # General extraction task
             return f"""Extract and summarize key information from this data chunk.
 
 DATA ({chunk_info}):
@@ -240,6 +250,7 @@ DATA ({chunk_info}):
 INSTRUCTIONS:
 - Identify the main topics, concepts, or data points
 - Preserve important details (numbers, names, dates, etc.)
+- Note the first and last items in this chunk
 - Organize findings in a clear, structured format
 - If code: describe main functions, classes, or logic
 - If data: summarize patterns, key values, or structure
@@ -345,11 +356,11 @@ FINDINGS FROM ALL CHUNKS:
 INSTRUCTIONS:
 - Combine all findings into a single, coherent answer to the original query
 - Resolve any contradictions between chunks (later chunks may have more complete data)
-- Aggregate counts, totals, and lists across all chunks
+- For totals/counts: prefer authoritative metadata (e.g., "total_records" field) over summing per-chunk counts, as chunk boundaries may overlap
 - Do NOT say "chunk 0 found X, chunk 3 found Y" — synthesize into one unified answer
-- If chunks report partial counts (e.g., "27 records in this chunk"), sum them for the total
+- For "first" or "last" items: the first chunk's first item is the overall first; the last chunk's last item is the overall last
 - Preserve specific details: names, numbers, dates, identifiers
-- Be direct and concise
+- Be direct and concise — no working shown, just the answer
 
 SYNTHESIZED ANSWER:"""
 
