@@ -1,338 +1,165 @@
-# RLM Plugin for Claude Code - Fixed & Production Ready
+# RLM Plugin for Claude Code
 
-The Recursive Language Model (RLM) plugin for Claude Code now provides **real LLM processing** with intelligent chunking strategies for massive contexts. This version fixes the original mock implementation with production-ready functionality.
+Map-reduce for LLM context windows. Process files that exceed your model's context limit by chunking, parallel extraction, and semantic synthesis.
 
-## 🔧 What's Fixed
+## What this actually does
 
-### ✅ Real LLM Processing (No More Mock Data)
-
-- **Actual analysis** using OpenAI, Anthropic, or local models
-- **Intelligent query processing** with optimized prompts
-- **Result aggregation** across chunks with deduplication
-- **Error handling** and graceful degradation
-
-### ✅ Multiple LLM Backends (Auto-Detection)
-
-- **Anthropic API** (Claude 4.5/4.6 Haiku/Sonnet/Opus) - Set `ANTHROPIC_API_KEY`
-- **OpenAI API** (GPT-4.1/4.1-mini) - Set `OPENAI_API_KEY`
-- **Local models** (Ollama, text-generation-webui, etc.)
-- **Claude CLI** - automatic, zero-config inside Claude Code (`claude -p`)
-- **Rule-based fallback** when no LLM available
-
-### ✅ Works Out of the Box
-
-- **Zero configuration inside Claude Code** - uses your existing session auth
-- **Automatic backend detection** with priority failover chain
-- **Thread-safe** singleton LLM manager for parallel chunk processing
-- **Production-ready** error handling and logging
-
-## 📊 Performance & Token Savings
-
-### Real-World Test Results
+When a file is too large to fit in a single LLM context window (200K tokens for Claude, ~800KB of text), you can't process it directly. RLM splits it into chunks, runs each chunk through an LLM in parallel, then synthesizes the per-chunk findings into a unified answer.
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                   TOKEN USAGE COMPARISON                     │
-├─────────────────────────────────────────────────────────────┤
-│                                                               │
-│  WITHOUT RLM (Direct Loading)                                │
-│  ████████████████████████████████████████████  1,310K tokens│
-│  ████████████████████████████████  888K tokens              │
-│  ██████████████████████  608K tokens                        │
-│                                                               │
-│  WITH RLM (Chunked Processing)                               │
-│  ██  17K tokens (-98.7%)                                    │
-│  ██  47K tokens (-94.7%)                                     │
-│  ███  61K tokens (-89.9%)                                    │
-│                                                               │
-│  Legend: █ = 50K tokens                                      │
-└─────────────────────────────────────────────────────────────┘
+Input (1.2MB JSON, 7864 records)
+  │
+  ├─ Chunk 0 ──→ LLM ──→ "Diana Garcia is first, 169 records here"
+  ├─ Chunk 1 ──→ LLM ──→ "167 records, users 169-335"
+  ├─ ...        (49 chunks in parallel)
+  └─ Chunk 48 ─→ LLM ──→ "John Smith is last, 112 records here"
+  │
+  └─ Synthesis (sonnet) ──→ "7,864 total records. First: Diana Garcia. Last: John Smith."
 ```
 
-### Context Window Utilization
+## When to use this
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│              CONTEXT WINDOW FIT (200K tokens)                │
-├──────────────────────────────────────────────────────────────┤
-│                                                               │
-│  File Size    │ Without RLM │ With RLM │ Improvement        │
-│  ─────────────┼─────────────┼──────────┼───────────────     │
-│  3.5MB JSON   │     ❌      │    ✅    │ 94.7% reduction    │
-│  2.4MB CSV    │     ❌      │    ✅    │ 89.9% reduction    │
-│  5.1MB Logs   │     ❌      │    ✅    │ 98.7% reduction    │
-│                                                               │
-│  Success Rate │    0/3      │   3/3    │ 100% enabled      │
-└──────────────────────────────────────────────────────────────┘
-```
+**Use RLM when your content exceeds the context window:**
 
-## 🚀 Scaling Predictions by Context Size
+- JSON files > 800KB
+- CSV datasets > 100K rows
+- Log files > 5MB
+- Codebases with 50+ files to analyze simultaneously
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                  TOKEN SCALING PROJECTION                     │
-├──────────────────────────────────────────────────────────────┤
-│                                                               │
-│  10M ┤                                              ●········│
-│      │                                          ●···         │
-│   5M ┤                                      ●···             │
-│      │                                  ●···                 │
-│   2M ┤                              ●···                     │
-│ T    │                          ●···                         │
-│ o 1M ┤                      ●···                             │
-│ k    │                  ●···          ───── Without RLM      │
-│ e    │              ●···              ····· With RLM (95%)   │
-│ n    │          ●···                                         │
-│ s    │      ●···●●●●●●●●●●●●●●●●●●                          │
-│ 200K ┤──●───────────────────────────── Context Limit ──────│
-│      │●···                                                   │
-│  50K ┤···                                                    │
-│      │                                                       │
-│    0 └───┬────┬────┬────┬────┬────┬────┬────┬────┬────┬────│
-│        100K  500K   1M   2M   3M   4M   5M  10M  20M  40M   │
-│                        File Size (bytes)                     │
-└──────────────────────────────────────────────────────────────┘
-```
+**Don't use RLM when content fits in context.** For anything under ~800KB, direct processing is faster, cheaper, and more accurate. There is no token savings — RLM costs 6-26% _more_ tokens due to per-chunk overhead and the synthesis pass.
 
-## 📈 Efficiency Metrics
+## Honest benchmarks
 
-### Processing Speed by File Type
+Tested 2026-02-12 against 1.2MB JSON (7864 user records), query: "How many records? First and last user name?"
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                   THROUGHPUT (MB/second)                      │
-├──────────────────────────────────────────────────────────────┤
-│                                                               │
-│  Logs     ████████████████████████████████████████  504 MB/s│
-│  CSV      ██████████████████████████████████████    473 MB/s│
-│  JSON     ████████████████████                      241 MB/s│
-│  Average  ████████████████████████████████          406 MB/s│
-│                                                               │
-└──────────────────────────────────────────────────────────────┘
-```
+| Metric           | Result                                                      |
+| ---------------- | ----------------------------------------------------------- |
+| Chunks           | 49 (parallel via OpenRouter)                                |
+| Total time       | 6.2s                                                        |
+| First user found | Diana Garcia (correct)                                      |
+| Last user found  | John Smith (correct)                                        |
+| Record count     | ~2% off (synthesis summed chunks instead of using metadata) |
+| Synthesis model  | claude-sonnet-4-5 via OpenRouter                            |
 
-### Memory Usage Comparison
+### Token cost comparison
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│                    MEMORY FOOTPRINT                           │
-├──────────────────────────────────────────────────────────────┤
-│                                                               │
-│  Traditional (Load Full File):                               │
-│  ████████████████████████████████████  [3.5MB → 3.5MB RAM]  │
-│                                                               │
-│  RLM (Chunked Processing):                                   │
-│  ████████  [3.5MB → 14MB peak, <10MB sustained]              │
-│                                                               │
-│  Efficiency: 75% less sustained memory usage                 │
-└──────────────────────────────────────────────────────────────┘
-```
+| Scenario              | Input tokens | Ratio | Verdict                              |
+| --------------------- | ------------ | ----- | ------------------------------------ |
+| 1.2MB JSON direct     | 310K         | 1.0x  | **Exceeds 200K window — impossible** |
+| 1.2MB JSON via RLM    | 329K total   | 1.06x | Works, costs 6% more                 |
+| 85KB codebase direct  | 21K          | 1.0x  | Fits in window — use direct          |
+| 85KB codebase via RLM | 27K total    | 1.26x | Unnecessary, 26% more expensive      |
 
-## 🎯 Verified Performance Stats
+**RLM does not save tokens.** It enables processing content that wouldn't fit otherwise.
 
-| Metric                        | Value    | Status       |
-| ----------------------------- | -------- | ------------ |
-| **Average Token Reduction**   | 94.5%    | ⭐⭐⭐⭐⭐   |
-| **Files Now Fitting Context** | 100%     | ✅ Perfect   |
-| **Processing Speed**          | 406 MB/s | ⚡ Fast      |
-| **Memory Overhead**           | <10MB    | 💚 Efficient |
-| **Chunk Parallelization**     | 8 agents | 🚀 Scalable  |
-| **Test Pass Rate**            | 100%     | ✅ Reliable  |
+### What works well
 
-## 🚀 Quick Setup
+- Chunking preserves 100% of facts (tested: 6/6 facts across 12 chunks)
+- Boundary detection: first/last items correctly identified across chunks
+- Parallel execution: 49 chunks in 6.2s via OpenRouter
+- Graceful degradation: falls back through 6 backends, never crashes
 
-### Step 1: Install Plugin
+### Known limitations
+
+- Exact counts across chunks can be ~2% off (map-reduce inherent limitation)
+- Claude CLI backend times out when run inside an active Claude Code session
+- Synthesis quality depends on per-chunk extraction quality
+
+## Setup
 
 ```bash
-# Plugin is already installed in your Claude Code directory
-cd "/Users/001/Dev/RLM tool/claude-code-rlm-plugin"
+git clone https://github.com/Plasma-Projects/claude-code-rlm-plugin.git
+cd claude-code-rlm-plugin
+pip install anthropic  # or: pip install openai
 ```
 
-### Step 2: Install Dependencies
+### Authentication (pick one)
 
 ```bash
-pip install anthropic  # Required for Anthropic backend
-# pip install openai   # Optional: for OpenAI backend
-# pip install requests # Optional: for local model backend
+# Option 1: OpenRouter (recommended — 200+ models, single key)
+export OPENROUTER_API_KEY="sk-or-v1-..."
+
+# Option 2: Anthropic API
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Option 3: OpenAI
+export OPENAI_API_KEY="sk-..."
+
+# Option 4: Local (Ollama)
+ollama serve
+
+# Option 5: Inside Claude Code (auto — uses claude CLI subprocess)
+# No config needed, but slow (~5s per chunk)
 ```
 
-### Step 3: Configure LLM Backend
+**Backend priority:** Anthropic > OpenAI > OpenRouter > Local > Claude CLI > Fallback
 
-```bash
-# Inside Claude Code: ZERO CONFIG NEEDED
-# Plugin auto-detects CLAUDE_CODE_OAUTH_TOKEN from your session
-
-# Outside Claude Code - pick one:
-export ANTHROPIC_API_KEY="your-key"    # Option 1: Anthropic
-export OPENAI_API_KEY="your-key"       # Option 2: OpenAI
-# ollama serve                         # Option 3: Local Ollama
-# claude -p "test"                     # Option 4: Claude CLI
-```
-
-**Auth priority:** `ANTHROPIC_API_KEY` > `OPENAI_API_KEY` > Local Ollama > Claude CLI (auto in Claude Code) > Fallback
-
-### Step 3: Test Installation
-
-```bash
-python test_fixed_plugin.py
-```
-
-## 🎯 Usage Examples
-
-### Real File Processing (Fixed)
+## Usage
 
 ```python
-from src import initialize
+from src import RLMPlugin
 
-# Initialize plugin - auto-detects best LLM backend
-rlm = initialize()
-print(f"Using: {rlm.get_llm_status()['current']}")
-
-# Process large file with real analysis
-result = rlm.process(
-    file_path="/path/to/large_dataset.json",
-    query="What patterns and anomalies exist in this data?"
-)
-
-# Before (mock): "[Processed chunk 0: 1247 chars]"
-# After (real):  "Analysis reveals 3 key patterns: user engagement peaks
-#                 2-4pm with 340% higher activity, categories A+B show
-#                 strong correlation (r=0.87), revenue optimization..."
-
-print(f"Strategy: {result['strategy']}")
-print(f"Chunks: {result['chunks_processed']}")
-print(f"Analysis: {result['result']['aggregated']}")
-```
-
-### REPL Interactive Mode
-
-```python
-# Start interactive session with real LLM
-with rlm.repl_session() as repl:
-    # Check LLM status
-    print(f"Backend: {repl.get_llm_status()['current']}")
-
-    # Load massive dataset
-    repl.load_file("/path/to/10MB_data.csv")
-
-    # Real analysis instead of mock
-    insights = repl.evaluate("llm_query('Find trends and anomalies', context)")
-    print(f"Real insights: {insights}")
-
-    # Custom processing with real LLM
-    repl.execute("""
-    chunks = decompose(context, strategy='auto')
-    results = [query_chunk(chunk, 'Extract key metrics') for chunk in chunks]
-    summary = aggregate(results)
-    print(f"Aggregated real analysis: {summary}")
-    """)
-```
-
-### Direct Content Processing
-
-```python
-# Process content string with real LLM analysis
-large_content = "..." # Large text content
-result = rlm.process(
-    content=large_content,
-    query="Summarize findings and provide actionable recommendations"
-)
-# Returns real analysis instead of placeholder text
-```
-
-## Configuration
-
-Edit `~/.config/opencode/plugins/rlm/.claude-plugin/plugin.json`:
-
-```json
-{
-  "auto_trigger": {
-    "file_size_kb": 50,
-    "token_count": 100000,
-    "file_count": 10,
-    "enabled": true
-  },
-  "processing": {
-    "max_concurrent_agents": 8,
-    "chunk_overlap_percent": 10
-  }
-}
-```
-
-## Strategies
-
-| File Type | Strategy                 | Description              | Token Reduction |
-| --------- | ------------------------ | ------------------------ | --------------- |
-| JSON/YAML | Structural Decomposition | Splits by keys/sections  | ~95%            |
-| CSV       | Row Batching             | Processes in row batches | ~90%            |
-| Logs      | Time Window              | Groups by timestamps     | ~98%            |
-| Code      | File Chunking            | Smart overlap chunking   | ~85%            |
-| Text      | Line-based               | Preserves context        | ~92%            |
-
-## 🏆 Benchmark Results
-
-### Test Dataset Performance
-
-```
-Dataset         Size    Tokens(Original)  Tokens(RLM)  Reduction
-──────────────────────────────────────────────────────────────
-large.json      3.5MB   887,884          46,730       94.7%
-large.csv       2.4MB   607,677          61,142       89.9%
-application.log 5.1MB   1,310,728        17,246       98.7%
-──────────────────────────────────────────────────────────────
-TOTAL                   2,806,289        125,118      95.5%
-```
-
-### Scaling Capabilities
-
-| Context Size | Without RLM | With RLM  | Files Processable |
-| ------------ | ----------- | --------- | ----------------- |
-| 200K tokens  | 200KB max   | 4MB max   | 20x more          |
-| 1M tokens    | 1MB max     | 20MB max  | 20x more          |
-| 10M tokens   | 10MB max    | 200MB max | 20x more          |
-
-## API
-
-```python
-# Initialize
 rlm = RLMPlugin()
 
-# Check if should activate
-should_activate = rlm.should_activate(context)
+# Process a large file with a query
+result = rlm.process(
+    file_path="/path/to/massive.json",
+    query="What are the top 10 users by score?"
+)
 
-# Process file
-result = rlm.process(file_path="/path/to/file")
+print(result["synthesis_applied"])  # True
+print(result["result"]["aggregated"])  # Unified answer
 
-# Process with query
-result = rlm.process(file_path="/path/to/file", query="Extract insights")
+# Process content string
+result = rlm.process(
+    content=large_string,
+    query="Summarize key findings"
+)
 
-# REPL session
-repl = rlm.repl_session()
-repl.load_file("/path/to/file")
-repl.execute("chunks = decompose(context)")
+# Check backend status
+print(rlm.get_llm_status())
+```
+
+### REPL mode
+
+```python
+with rlm.repl_session() as repl:
+    repl.load_file("/path/to/data.csv")
+    result = repl.evaluate("llm_query('Find anomalies', context)")
 ```
 
 ## Architecture
 
 ```
-RLM Plugin
-├── Context Router (activation logic)
-├── REPL Engine (interactive processing)
-├── Agent Manager (parallel execution)
-└── Strategies (decomposition methods)
-    ├── File Chunking
-    ├── Structural Decomposition
-    └── Time Window Splitting
+RLMPlugin
+├── ContextRouter         — decides when to activate, selects chunking strategy
+├── ParallelAgentManager  — parallel chunk processing + two-phase aggregation
+│   ├── Phase 1: per-chunk extraction (haiku, parallel)
+│   └── Phase 2: semantic synthesis (sonnet, single pass)
+├── LLMManager            — 6 backends with auto-fallback
+│   ├── AnthropicBackend
+│   ├── OpenAIBackend
+│   ├── OpenRouterBackend (tiered model selection)
+│   ├── LocalLLMBackend   (Ollama)
+│   ├── ClaudeCLIBackend  (subprocess)
+│   └── SimpleFallbackBackend (rule-based)
+└── REPLEngine            — interactive processing
 ```
 
-## Based on Research
+### Chunking strategies
 
-[Recursive Language Models](https://arxiv.org/html/2512.24601v1) - Enables LLMs to programmatically examine and recursively process massive contexts.
+| Data type | Strategy                 | How it splits                     |
+| --------- | ------------------------ | --------------------------------- |
+| JSON/YAML | Structural decomposition | By top-level keys                 |
+| CSV       | Row batching             | Groups of rows                    |
+| Logs      | Time window              | By timestamp ranges               |
+| Code      | File chunking            | By file with overlap              |
+| Text      | Token chunking           | Fixed-size with edge preservation |
+
+## Based on
+
+[Recursive Language Models](https://arxiv.org/html/2512.24601v1) — programmatic examination and recursive processing of contexts that exceed LLM window limits.
 
 ## License
 
 MIT
-
----
-
-_Verified with comprehensive benchmarks showing 94.5% average token reduction and 100% success rate for large file processing._
